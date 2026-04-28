@@ -1,6 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 
 type Card = {
   id: string;
@@ -38,7 +50,7 @@ const initialColumns: Column[] = [
       {
         id: "3",
         title: "Implement drag and drop",
-        description: "Move cards between columns.",
+        description: "Move cards between columns with dnd-kit.",
       },
     ],
   },
@@ -48,12 +60,85 @@ const initialColumns: Column[] = [
     cards: [
       {
         id: "4",
-        title: "Run local development server",
-        description: "Open localhost:3000 successfully.",
+        title: "Deploy project",
+        description: "Publish the application on Vercel.",
       },
     ],
   },
 ];
+
+function DroppableColumn({
+  column,
+  children,
+}: {
+  column: Column;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: column.id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`min-h-[420px] rounded-2xl border p-4 shadow-lg transition ${
+        isOver
+          ? "border-blue-500 bg-slate-800"
+          : "border-slate-800 bg-slate-900"
+      }`}
+    >
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{column.title}</h2>
+        <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
+          {column.cards.length} cards
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DraggableCard({
+  card,
+  isEditing,
+  children,
+}: {
+  card: Card;
+  isEditing: boolean;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: card.id,
+      disabled: isEditing,
+    });
+
+  const style = {
+    transform: transform ? CSS.Translate.toString(transform) : undefined,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="rounded-xl border border-slate-700 bg-slate-950 p-4 shadow-md transition hover:border-blue-500"
+    >
+      {!isEditing && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="mb-3 inline-flex touch-none select-none items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 active:cursor-grabbing"
+        >
+          <span className="text-slate-500">☰</span>
+          <span>Drag</span>
+        </div>
+      )}
+
+      {children}
+    </div>
+  );
+}
 
 export default function Home() {
   const [userName, setUserName] = useState("");
@@ -63,11 +148,25 @@ export default function Home() {
   const [columns, setColumns] = useState<Column[]>(initialColumns);
   const [newCardTitle, setNewCardTitle] = useState("");
   const [newCardDescription, setNewCardDescription] = useState("");
-  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
 
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [editingDescription, setEditingDescription] = useState("");
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 150,
+        tolerance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor)
+  );
 
   useEffect(() => {
     const savedUser = localStorage.getItem("taskflow-user");
@@ -162,36 +261,42 @@ export default function Home() {
     cancelEditing();
   }
 
-  function moveCard(targetColumnId: string) {
-    if (!draggedCardId) return;
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+
+    if (!over) return;
+
+    const cardId = String(active.id);
+    const targetColumnId = String(over.id);
 
     let movedCard: Card | undefined;
+    let sourceColumnId: string | undefined;
 
-    const updatedColumns = columns.map((column) => {
-      const card = column.cards.find((c) => c.id === draggedCardId);
+    const columnsWithoutCard = columns.map((column) => {
+      const card = column.cards.find((item) => item.id === cardId);
 
       if (card) {
         movedCard = card;
+        sourceColumnId = column.id;
+
         return {
           ...column,
-          cards: column.cards.filter((c) => c.id !== draggedCardId),
+          cards: column.cards.filter((item) => item.id !== cardId),
         };
       }
 
       return column;
     });
 
-    if (!movedCard) return;
+    if (!movedCard || sourceColumnId === targetColumnId) return;
 
     setColumns(
-      updatedColumns.map((column) =>
+      columnsWithoutCard.map((column) =>
         column.id === targetColumnId
           ? { ...column, cards: [...column.cards, movedCard as Card] }
           : column
       )
     );
-
-    setDraggedCardId(null);
   }
 
   function resetBoard() {
@@ -248,13 +353,14 @@ export default function Home() {
             </h1>
             <p className="mt-2 max-w-2xl text-slate-400">
               Create, edit, delete, and organize tasks across workflow columns.
-              Drag-and-drop changes are saved automatically in the browser.
+              Drag-and-drop is powered by dnd-kit for better mobile support.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
             <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300">
-              Signed in as <span className="font-semibold text-white">{userName}</span>
+              Signed in as{" "}
+              <span className="font-semibold text-white">{userName}</span>
             </div>
 
             <button
@@ -318,99 +424,86 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-3">
-          {columns.map((column) => (
-            <div
-              key={column.id}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => moveCard(column.id)}
-              className="min-h-[420px] rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-lg"
-            >
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">{column.title}</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
-                  {column.cards.length} cards
-                </span>
-              </div>
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          <div className="grid gap-5 md:grid-cols-3">
+            {columns.map((column) => (
+              <DroppableColumn key={column.id} column={column}>
+                <div className="space-y-3">
+                  {column.cards.map((card) => (
+                    <DraggableCard
+                      key={card.id}
+                      card={card}
+                      isEditing={editingCardId === card.id}
+                    >
+                      {editingCardId === card.id ? (
+                        <div className="space-y-3">
+                          <input
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          />
 
-              <div className="space-y-3">
-                {column.cards.map((card) => (
-                  <div
-                    key={card.id}
-                    draggable={editingCardId !== card.id}
-                    onDragStart={() => setDraggedCardId(card.id)}
-                    className="rounded-xl border border-slate-700 bg-slate-950 p-4 shadow-md transition hover:border-blue-500"
-                  >
-                    {editingCardId === card.id ? (
-                      <div className="space-y-3">
-                        <input
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                        />
+                          <textarea
+                            value={editingDescription}
+                            onChange={(e) =>
+                              setEditingDescription(e.target.value)
+                            }
+                            className="h-24 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          />
 
-                        <textarea
-                          value={editingDescription}
-                          onChange={(e) =>
-                            setEditingDescription(e.target.value)
-                          }
-                          className="h-24 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                        />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => saveEditing(card.id)}
+                              className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold hover:bg-green-500"
+                            >
+                              Save
+                            </button>
 
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => saveEditing(card.id)}
-                            className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold hover:bg-green-500"
-                          >
-                            Save
-                          </button>
-
-                          <button
-                            onClick={cancelEditing}
-                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800"
-                          >
-                            Cancel
-                          </button>
+                            <button
+                              onClick={cancelEditing}
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800"
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="cursor-grab active:cursor-grabbing">
+                      ) : (
+                        <>
                           <h3 className="font-semibold">{card.title}</h3>
                           <p className="mt-2 text-sm leading-6 text-slate-400">
                             {card.description}
                           </p>
-                        </div>
 
-                        <div className="mt-4 flex gap-2">
-                          <button
-                            onClick={() => startEditing(card)}
-                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800"
-                          >
-                            Edit
-                          </button>
+                          <div className="mt-4 flex gap-2">
+                            <button
+                              onClick={() => startEditing(card)}
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800"
+                            >
+                              Edit
+                            </button>
 
-                          <button
-                            onClick={() => deleteCard(card.id)}
-                            className="rounded-lg border border-red-900 px-3 py-2 text-xs text-red-300 hover:bg-red-950"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
+                            <button
+                              onClick={() => deleteCard(card.id)}
+                              className="rounded-lg border border-red-900 px-3 py-2 text-xs text-red-300 hover:bg-red-950"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </DraggableCard>
+                  ))}
 
-                {column.cards.length === 0 && (
-                  <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">
-                    Drop cards here
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+                  {column.cards.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">
+                      Drop cards here
+                    </div>
+                  )}
+                </div>
+              </DroppableColumn>
+            ))}
+          </div>
+        </DndContext>
 
         <footer className="mt-10 border-t border-slate-800 pt-6 text-center text-sm text-slate-500">
           Built by Sami Yorulmaz | Internship Challenge 2026
